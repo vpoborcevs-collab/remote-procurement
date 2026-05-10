@@ -72,11 +72,38 @@ def load_jobs() -> list[dict]:
     return []
 
 
+def _is_expired(job: dict) -> bool:
+    now = datetime.utcnow()
+    # Explicit deadline from source (e.g. WeWorkRemotely)
+    exp = job.get("expires_at")
+    if exp:
+        try:
+            from email.utils import parsedate_to_datetime
+            return parsedate_to_datetime(exp).replace(tzinfo=None) < now
+        except Exception:
+            pass
+    # Fallback: remove after 30 days
+    found = job.get("found_at", "")
+    if found:
+        try:
+            age = now - datetime.strptime(found, "%Y-%m-%dT%H:%M:%SZ")
+            return age.days > 30
+        except Exception:
+            pass
+    return False
+
+
 def save_jobs(new_jobs: list[dict]) -> None:
     existing = load_jobs()
     existing_ids = {j["id"] for j in existing}
     to_add = [j for j in new_jobs if j["id"] not in existing_ids]
     all_jobs = to_add + existing  # newest first
+    # Remove expired postings
+    before = len(all_jobs)
+    all_jobs = [j for j in all_jobs if not _is_expired(j)]
+    expired = before - len(all_jobs)
+    if expired:
+        print(f"  Removed {expired} expired posting(s)")
     JOBS_FILE.write_text(json.dumps(all_jobs, indent=2, ensure_ascii=False))
 
 
@@ -292,11 +319,12 @@ def fetch_weworkremotely() -> list[dict]:
             results.append({
                 "id":       f"wwr_{abs(hash(url))}",
                 "title":    title,
-                "company":  company,
-                "location": _extract("region") or "Worldwide",
-                "url":      url,
-                "tags":     _extract("category"),
-                "source":   "WeWorkRemotely",
+                "company":    company,
+                "location":   _extract("region") or "Worldwide",
+                "url":        url,
+                "tags":       _extract("category"),
+                "expires_at": _extract("expires_at") or None,
+                "source":     "WeWorkRemotely",
             })
         return results
     except Exception as exc:
