@@ -21,6 +21,7 @@ import httpx
 # ---------------------------------------------------------------------------
 
 SEEN_FILE = Path(__file__).parent / "seen_jobs.json"
+JOBS_FILE = Path(__file__).parent / "jobs.json"
 
 PROCUREMENT_KEYWORDS = [
     "procurement", "sourcing", "purchasing",
@@ -57,6 +58,20 @@ def load_seen() -> set[str]:
 
 def save_seen(seen: set[str]) -> None:
     SEEN_FILE.write_text(json.dumps(sorted(seen), indent=2))
+
+
+def load_jobs() -> list[dict]:
+    if JOBS_FILE.exists():
+        return json.loads(JOBS_FILE.read_text())
+    return []
+
+
+def save_jobs(new_jobs: list[dict]) -> None:
+    existing = load_jobs()
+    existing_ids = {j["id"] for j in existing}
+    to_add = [j for j in new_jobs if j["id"] not in existing_ids]
+    all_jobs = to_add + existing  # newest first
+    JOBS_FILE.write_text(json.dumps(all_jobs, indent=2, ensure_ascii=False))
 
 
 # ---------------------------------------------------------------------------
@@ -190,8 +205,14 @@ def scan() -> list[dict]:
 
     print(f"  New (not seen before): {len(new_jobs)}")
 
+    # Stamp found_at
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    for j in new_jobs:
+        j["found_at"] = now
+
     # Persist
     save_seen(seen | seen_this_run)
+    save_jobs(new_jobs)
 
     return new_jobs
 
