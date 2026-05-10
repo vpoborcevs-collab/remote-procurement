@@ -265,6 +265,104 @@ def fetch_arbeitnow() -> list[dict]:
         return []
 
 
+def fetch_weworkremotely() -> list[dict]:
+    """We Work Remotely RSS feed."""
+    try:
+        r = httpx.get(
+            "https://weworkremotely.com/remote-jobs.rss",
+            headers={"User-Agent": "Mozilla/5.0 (compatible; job-scanner/1.0)"},
+            timeout=20,
+            follow_redirects=True,
+        )
+        items = re.findall(r"<item>(.*?)</item>", r.text, re.DOTALL)
+        results = []
+        for item in items:
+            def _extract(tag: str) -> str:
+                m = re.search(rf"<{tag}[^>]*>(.*?)</{tag}>", item, re.DOTALL)
+                return re.sub(r"<!\[CDATA\[|\]\]>", "", m.group(1)).strip() if m else ""
+            raw_title = _extract("title")
+            parts = raw_title.split(": ", 1)
+            company = parts[0] if len(parts) > 1 else ""
+            title   = parts[1] if len(parts) > 1 else raw_title
+            url     = _extract("link") or _extract("guid")
+            results.append({
+                "id":       f"wwr_{abs(hash(url))}",
+                "title":    title,
+                "company":  company,
+                "location": _extract("region") or "Worldwide",
+                "url":      url,
+                "tags":     _extract("category"),
+                "source":   "WeWorkRemotely",
+            })
+        return results
+    except Exception as exc:
+        print(f"[WeWorkRemotely] error: {exc}")
+        return []
+
+
+def fetch_workingnomads() -> list[dict]:
+    """Working Nomads public JSON API."""
+    try:
+        r = httpx.get(
+            "https://www.workingnomads.com/api/exposed_jobs/",
+            params={"limit": 200},
+            timeout=20,
+            follow_redirects=True,
+        )
+        data = r.json()
+        return [
+            {
+                "id":       f"wn_{abs(hash(j.get('url', j.get('title', ''))))}",
+                "title":    j.get("title", ""),
+                "company":  j.get("company_name", ""),
+                "location": j.get("location", "Remote"),
+                "url":      j.get("url", ""),
+                "tags":     f"{j.get('category_name', '')} {j.get('tags', '')}",
+                "source":   "WorkingNomads",
+            }
+            for j in data
+            if isinstance(j, dict)
+        ]
+    except Exception as exc:
+        print(f"[WorkingNomads] error: {exc}")
+        return []
+
+
+def fetch_euremotejobs() -> list[dict]:
+    """EU Remote Jobs WordPress REST API (European-focused remote jobs)."""
+    results: list[dict] = []
+    for page in range(1, 4):
+        try:
+            r = httpx.get(
+                "https://euremotejobs.com/wp-json/wp/v2/job-listings",
+                params={"per_page": 50, "page": page},
+                timeout=20,
+                follow_redirects=True,
+            )
+            if r.status_code != 200:
+                break
+            data = r.json()
+            if not data:
+                break
+            for j in data:
+                meta    = j.get("meta", {})
+                company = meta.get("_company_name", "")
+                title   = re.sub(r"&#\d+;|&\w+;|<[^>]+>", "", j.get("title", {}).get("rendered", "")).strip()
+                results.append({
+                    "id":       f"eu_{j['id']}",
+                    "title":    title,
+                    "company":  company,
+                    "location": "Europe",
+                    "url":      j.get("link", ""),
+                    "tags":     "",
+                    "source":   "EURemoteJobs",
+                })
+        except Exception as exc:
+            print(f"[EURemoteJobs] error (page={page}): {exc}")
+            break
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Scan
 # ---------------------------------------------------------------------------
@@ -278,6 +376,9 @@ def scan() -> list[dict]:
     all_jobs.extend(fetch_jobicy())
     all_jobs.extend(fetch_linkedin())
     all_jobs.extend(fetch_arbeitnow())
+    all_jobs.extend(fetch_weworkremotely())
+    all_jobs.extend(fetch_workingnomads())
+    all_jobs.extend(fetch_euremotejobs())
     print(f"  Total fetched: {len(all_jobs)}")
 
     # Filter: procurement role + eligible location
@@ -365,7 +466,7 @@ def build_html(jobs: list[dict]) -> str:
     </div>
     <div style="padding:16px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;
                 font-size:11px;color:#9ca3af;">
-      Sources: RemoteOK · Remotive · Jobicy · LinkedIn · Arbeitnow &nbsp;|&nbsp;
+      Sources: RemoteOK · Remotive · Jobicy · LinkedIn · Arbeitnow · WeWorkRemotely · WorkingNomads · EURemoteJobs &nbsp;|&nbsp;
       Keywords: procurement, sourcing, category management, indirect
     </div>
   </div>
