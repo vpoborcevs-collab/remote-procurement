@@ -107,19 +107,28 @@ def fetch_remoteok() -> list[dict]:
         jobs = r.json()
         if isinstance(jobs, list) and jobs:
             jobs = jobs[1:]  # skip metadata header
-        return [
-            {
+        result = []
+        for j in jobs:
+            if not isinstance(j, dict):
+                continue
+            sal_min = j.get("salary_min") or j.get("salary", {}).get("min") if isinstance(j.get("salary"), dict) else j.get("salary_min")
+            sal_max = j.get("salary_max") or j.get("salary", {}).get("max") if isinstance(j.get("salary"), dict) else j.get("salary_max")
+            salary = None
+            if sal_min and sal_max:
+                salary = f"${int(sal_min)//1000}k–${int(sal_max)//1000}k/yr gross"
+            elif sal_min:
+                salary = f"${int(sal_min)//1000}k+/yr gross"
+            result.append({
                 "id": f"rok_{j.get('id', j.get('slug', ''))}",
                 "title": j.get("position", ""),
                 "company": j.get("company", ""),
                 "location": j.get("location", "Worldwide"),
                 "url": j.get("url", f"https://remoteok.com/remote-jobs/{j.get('slug','')}"),
                 "tags": " ".join(j.get("tags", [])),
+                "salary": salary,
                 "source": "RemoteOK",
-            }
-            for j in jobs
-            if isinstance(j, dict)
-        ]
+            })
+        return result
     except Exception as exc:
         print(f"[RemoteOK] error: {exc}")
         return []
@@ -207,12 +216,14 @@ def fetch_linkedin() -> list[dict]:
                     company_el = card.select_one("h4.base-search-card__subtitle")
                     loc_el     = card.select_one("span.job-search-card__location")
                     link_el    = card.select_one("a.base-card__full-link")
+                    salary_el  = card.select_one("span.job-search-card__salary-info")
                     if not (title_el and link_el):
                         continue
                     url = link_el["href"].split("?")[0]
-                    # extract numeric ID from URL like /jobs/view/1234567890/
                     m = re.search(r"/jobs/view/(\d+)", url)
                     job_id = f"li_{m.group(1)}" if m else f"li_{abs(hash(url))}"
+                    raw_salary = salary_el.get_text(strip=True) if salary_el else None
+                    salary = f"{raw_salary} gross/mo" if raw_salary else None
                     results.append({
                         "id": job_id,
                         "title": title_el.get_text(strip=True),
@@ -220,6 +231,7 @@ def fetch_linkedin() -> list[dict]:
                         "location": loc_el.get_text(strip=True) if loc_el else "Europe",
                         "url": url,
                         "tags": "",
+                        "salary": salary,
                         "source": "LinkedIn",
                     })
             except Exception as exc:
