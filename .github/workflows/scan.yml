@@ -40,6 +40,6 @@ jobs:
         run: |
           git config user.name  "job-scanner[bot]"
           git config user.email "job-scanner[bot]@users.noreply.github.com"
-          git add seen_jobs.json jobs.json
+          git add seen_jobs.json jobs.json dismissed.json
           git diff --staged --quiet || git commit -m "chore: update jobs [skip ci]"
           git push

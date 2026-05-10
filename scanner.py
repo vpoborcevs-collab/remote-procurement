@@ -22,8 +22,9 @@ from bs4 import BeautifulSoup
 # Config
 # ---------------------------------------------------------------------------
 
-SEEN_FILE = Path(__file__).parent / "seen_jobs.json"
-JOBS_FILE = Path(__file__).parent / "jobs.json"
+SEEN_FILE      = Path(__file__).parent / "seen_jobs.json"
+JOBS_FILE      = Path(__file__).parent / "jobs.json"
+DISMISSED_FILE = Path(__file__).parent / "dismissed.json"
 
 PROCUREMENT_KEYWORDS = [
     "procurement", "sourcing", "purchasing",
@@ -53,9 +54,12 @@ EUROPE_KEYWORDS = [
 # ---------------------------------------------------------------------------
 
 def load_seen() -> set[str]:
+    seen: set[str] = set()
     if SEEN_FILE.exists():
-        return set(json.loads(SEEN_FILE.read_text()))
-    return set()
+        seen |= set(json.loads(SEEN_FILE.read_text()))
+    if DISMISSED_FILE.exists():
+        seen |= set(json.loads(DISMISSED_FILE.read_text()))
+    return seen
 
 
 def save_seen(seen: set[str]) -> None:
@@ -379,6 +383,24 @@ def scan() -> list[dict]:
     all_jobs.extend(fetch_weworkremotely())
     all_jobs.extend(fetch_workingnomads())
     all_jobs.extend(fetch_euremotejobs())
+
+    # Cross-source deduplication: same URL or same title+company
+    seen_urls: set[str] = set()
+    seen_slugs: set[str] = set()
+    deduped: list[dict] = []
+    for j in all_jobs:
+        url_key  = j.get("url", "").split("?")[0].rstrip("/").lower()
+        slug_key = (j.get("title", "").lower().strip() + "|" + j.get("company", "").lower().strip())
+        if url_key and url_key in seen_urls:
+            continue
+        if slug_key and slug_key != "|" and slug_key in seen_slugs:
+            continue
+        if url_key:
+            seen_urls.add(url_key)
+        if slug_key != "|":
+            seen_slugs.add(slug_key)
+        deduped.append(j)
+    all_jobs = deduped
     print(f"  Total fetched: {len(all_jobs)}")
 
     # Filter: procurement role + eligible location
