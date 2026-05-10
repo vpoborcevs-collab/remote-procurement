@@ -33,7 +33,7 @@ jobs:
         env:
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_TO: vpoborcevs@gmail.com
         run: python scanner.py
 
       - name: Commit updated seen_jobs.json
