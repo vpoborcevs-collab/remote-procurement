@@ -227,46 +227,30 @@ def fetch_linkedin() -> list[dict]:
     return results
 
 
-def fetch_eures() -> list[dict]:
-    """EURES EU official jobs portal REST API."""
-    results: list[dict] = []
-    url = "https://eures.ec.europa.eu/api/jv-search/search"
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (compatible; job-scanner/1.0)",
-    }
-    for keyword in ["procurement", "sourcing", "purchasing", "category manager"]:
-        try:
-            r = httpx.post(
-                url,
-                json={
-                    "keywords": [keyword],
-                    "from": 0,
-                    "size": 50,
-                    "selectedFacets": {},
-                },
-                headers=headers,
-                timeout=25,
-                follow_redirects=True,
-            )
-            data = r.json()
-            for j in data.get("jobVacancies", data.get("hits", {}).get("hits", [])):
-                # EURES wraps result in _source for ES responses
-                src = j.get("_source", j)
-                job_id_raw = src.get("handle") or src.get("id") or src.get("jobVacancyId", "")
-                results.append({
-                    "id": f"eu_{job_id_raw}",
-                    "title": src.get("position", src.get("title", "")),
-                    "company": src.get("employer", {}).get("name", src.get("company", "")),
-                    "location": src.get("placeOfWork", src.get("location", "EU")),
-                    "url": f"https://eures.ec.europa.eu/jobs/{job_id_raw}" if job_id_raw else "https://eures.ec.europa.eu",
-                    "tags": keyword,
-                    "source": "EURES",
-                })
-        except Exception as exc:
-            print(f"[EURES] error (keyword={keyword}): {exc}")
-    return results
+def fetch_arbeitnow() -> list[dict]:
+    """Arbeitnow — European remote jobs, free public API."""
+    try:
+        r = httpx.get(
+            "https://arbeitnow.com/api/job-board-api",
+            timeout=20,
+            follow_redirects=True,
+        )
+        data = r.json()
+        return [
+            {
+                "id": f"arb_{j['slug']}",
+                "title": j.get("title", ""),
+                "company": j.get("company_name", ""),
+                "location": j.get("location", "Europe"),
+                "url": j.get("url", ""),
+                "tags": " ".join(j.get("tags", [])),
+                "source": "Arbeitnow",
+            }
+            for j in data.get("data", [])
+        ]
+    except Exception as exc:
+        print(f"[Arbeitnow] error: {exc}")
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +265,7 @@ def scan() -> list[dict]:
     all_jobs.extend(fetch_remotive())
     all_jobs.extend(fetch_jobicy())
     all_jobs.extend(fetch_linkedin())
-    all_jobs.extend(fetch_eures())
+    all_jobs.extend(fetch_arbeitnow())
     print(f"  Total fetched: {len(all_jobs)}")
 
     # Filter: procurement role + eligible location
@@ -369,7 +353,7 @@ def build_html(jobs: list[dict]) -> str:
     </div>
     <div style="padding:16px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;
                 font-size:11px;color:#9ca3af;">
-      Sources: RemoteOK · Remotive · Jobicy · LinkedIn · EURES &nbsp;|&nbsp;
+      Sources: RemoteOK · Remotive · Jobicy · LinkedIn · Arbeitnow &nbsp;|&nbsp;
       Keywords: procurement, sourcing, category management, indirect
     </div>
   </div>
