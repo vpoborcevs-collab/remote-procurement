@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 Daily remote procurement job scanner.
-Sources: RemoteOK, Remotive, Jobicy
+Sources: RemoteOK, Remotive, Jobicy, LinkedIn, EURES
 Sends HTML email digest of new jobs only (deduplicates via seen_jobs.json).
 """
 
 import json
 import os
+import re
 import smtplib
 import ssl
 from datetime import datetime
@@ -15,6 +16,7 @@ from email.mime.text import MIMEText
 from pathlib import Path
 
 import httpx
+from bs4 import BeautifulSoup
 
 # ---------------------------------------------------------------------------
 # Config
@@ -173,6 +175,100 @@ def fetch_jobicy() -> list[dict]:
         return []
 
 
+def fetch_linkedin() -> list[dict]:
+    """LinkedIn guest jobs API — returns HTML, parsed with BeautifulSoup."""
+    results: list[dict] = []
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    for keyword in ["procurement sourcing", "category manager", "purchasing manager"]:
+        for start in [0, 25]:
+            try:
+                r = httpx.get(
+                    "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search",
+                    params={
+                        "keywords": keyword,
+                        "location": "Europe",
+                        "f_WT": "2",  # remote only
+                        "start": str(start),
+                    },
+                    headers=headers,
+                    timeout=20,
+                    follow_redirects=True,
+                )
+                soup = BeautifulSoup(r.text, "lxml")
+                for card in soup.select("li"):
+                    title_el   = card.select_one("h3.base-search-card__title")
+                    company_el = card.select_one("h4.base-search-card__subtitle")
+                    loc_el     = card.select_one("span.job-search-card__location")
+                    link_el    = card.select_one("a.base-card__full-link")
+                    if not (title_el and link_el):
+                        continue
+                    url = link_el["href"].split("?")[0]
+                    # extract numeric ID from URL like /jobs/view/1234567890/
+                    m = re.search(r"/jobs/view/(\d+)", url)
+                    job_id = f"li_{m.group(1)}" if m else f"li_{abs(hash(url))}"
+                    results.append({
+                        "id": job_id,
+                        "title": title_el.get_text(strip=True),
+                        "company": company_el.get_text(strip=True) if company_el else "",
+                        "location": loc_el.get_text(strip=True) if loc_el else "Europe",
+                        "url": url,
+                        "tags": "",
+                        "source": "LinkedIn",
+                    })
+            except Exception as exc:
+                print(f"[LinkedIn] error (keyword={keyword}, start={start}): {exc}")
+    return results
+
+
+def fetch_eures() -> list[dict]:
+    """EURES EU official jobs portal REST API."""
+    results: list[dict] = []
+    url = "https://eures.ec.europa.eu/api/jv-search/search"
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; job-scanner/1.0)",
+    }
+    for keyword in ["procurement", "sourcing", "purchasing", "category manager"]:
+        try:
+            r = httpx.post(
+                url,
+                json={
+                    "keywords": [keyword],
+                    "from": 0,
+                    "size": 50,
+                    "selectedFacets": {},
+                },
+                headers=headers,
+                timeout=25,
+                follow_redirects=True,
+            )
+            data = r.json()
+            for j in data.get("jobVacancies", data.get("hits", {}).get("hits", [])):
+                # EURES wraps result in _source for ES responses
+                src = j.get("_source", j)
+                job_id_raw = src.get("handle") or src.get("id") or src.get("jobVacancyId", "")
+                results.append({
+                    "id": f"eu_{job_id_raw}",
+                    "title": src.get("position", src.get("title", "")),
+                    "company": src.get("employer", {}).get("name", src.get("company", "")),
+                    "location": src.get("placeOfWork", src.get("location", "EU")),
+                    "url": f"https://eures.ec.europa.eu/jobs/{job_id_raw}" if job_id_raw else "https://eures.ec.europa.eu",
+                    "tags": keyword,
+                    "source": "EURES",
+                })
+        except Exception as exc:
+            print(f"[EURES] error (keyword={keyword}): {exc}")
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Scan
 # ---------------------------------------------------------------------------
@@ -184,6 +280,8 @@ def scan() -> list[dict]:
     all_jobs.extend(fetch_remoteok())
     all_jobs.extend(fetch_remotive())
     all_jobs.extend(fetch_jobicy())
+    all_jobs.extend(fetch_linkedin())
+    all_jobs.extend(fetch_eures())
     print(f"  Total fetched: {len(all_jobs)}")
 
     # Filter: procurement role + eligible location
@@ -271,7 +369,7 @@ def build_html(jobs: list[dict]) -> str:
     </div>
     <div style="padding:16px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;
                 font-size:11px;color:#9ca3af;">
-      Sources: RemoteOK · Remotive · Jobicy &nbsp;|&nbsp;
+      Sources: RemoteOK · Remotive · Jobicy · LinkedIn · EURES &nbsp;|&nbsp;
       Keywords: procurement, sourcing, category management, indirect
     </div>
   </div>
