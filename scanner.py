@@ -93,10 +93,18 @@ def _is_expired(job: dict) -> bool:
     return False
 
 
+def _slug(j: dict) -> str:
+    return j.get("title", "").lower().strip() + "|" + j.get("company", "").lower().strip()
+
+
 def save_jobs(new_jobs: list[dict]) -> None:
     existing = load_jobs()
-    existing_ids = {j["id"] for j in existing}
-    to_add = [j for j in new_jobs if j["id"] not in existing_ids]
+    existing_ids  = {j["id"] for j in existing}
+    existing_slugs = {_slug(j) for j in existing}
+    to_add = [
+        j for j in new_jobs
+        if j["id"] not in existing_ids and _slug(j) not in existing_slugs
+    ]
     all_jobs = to_add + existing  # newest first
     # Remove expired postings
     before = len(all_jobs)
