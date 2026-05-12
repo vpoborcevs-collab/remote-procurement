@@ -263,6 +263,11 @@ def fetch_linkedin() -> list[dict]:
                     job_id = f"li_{m.group(1)}" if m else f"li_{abs(hash(url))}"
                     raw_salary = salary_el.get_text(strip=True) if salary_el else None
                     salary = f"{raw_salary} gross/mo" if raw_salary else None
+                    card_text = card.get_text(separator=" ").lower()
+                    easy_apply = (
+                        bool(card.select_one(".job-search-card__easy-apply-label"))
+                        or "easy apply" in card_text
+                    )
                     results.append({
                         "id": job_id,
                         "title": title_el.get_text(strip=True),
@@ -272,6 +277,7 @@ def fetch_linkedin() -> list[dict]:
                         "tags": "",
                         "salary": salary,
                         "source": "LinkedIn",
+                        "easy_apply": easy_apply,
                     })
             except Exception as exc:
                 print(f"[LinkedIn] error (keyword={keyword}, start={start}): {exc}")
