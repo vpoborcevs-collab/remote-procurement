@@ -1,10 +1,12 @@
 name: Daily Procurement Job Scan
 
 on:
-  schedule:
-    # 07:00 UTC = 09:00 Latvia (EET) / 10:00 Latvia (EEST summer)
-    # Runs Mon–Fri only
-    - cron: '0 7 * * 1-5'
+  # Paused: scheduled weekday scans are disabled.
+  # To resume, restore the cron below:
+  # schedule:
+  #   # 07:00 UTC = 09:00 Latvia (EET) / 10:00 Latvia (EEST summer)
+  #   # Runs Mon-Fri only
+  #   - cron: '0 7 * * 1-5'
   workflow_dispatch:   # allow manual trigger from GitHub Actions tab
 
 permissions:
